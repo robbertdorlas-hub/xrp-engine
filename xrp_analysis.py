@@ -7,16 +7,26 @@ from ta.volatility import BollingerBands
 from datetime import datetime
 import os
 
-SYMBOL = "XRPUSDT"
+SYMBOLS = [
+    "XRPUSDT",
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "LINKUSDT",
+    "BCHUSDT"
+]
+
 LOG_FILE = "xrp_prediction_log.csv"
 CHART_FILE = "xrp_chart.png"
 
 
-def get_data(interval):
+def get_data(symbol, interval):
     url = "https://api.binance.com/api/v3/klines"
 
     params = {
-        "symbol": SYMBOL,
+        "symbol": symbol,
         "interval": interval,
         "limit": 150
     }
@@ -77,18 +87,10 @@ def detect_candle(df):
     if upper_wick > body * 2 and lower_wick < body:
         return "Shooting Star", -1
 
-    if (
-        prev["close"] < prev["open"]
-        and last["close"] > last["open"]
-        and last["close"] > prev["open"]
-    ):
+    if prev["close"] < prev["open"] and last["close"] > last["open"] and last["close"] > prev["open"]:
         return "Bullish Engulfing", 2
 
-    if (
-        prev["close"] > prev["open"]
-        and last["close"] < last["open"]
-        and last["close"] < prev["open"]
-    ):
+    if prev["close"] > prev["open"] and last["close"] < last["open"] and last["close"] < prev["open"]:
         return "Bearish Engulfing", -2
 
     return "Geen duidelijk patroon", 0
@@ -96,16 +98,8 @@ def detect_candle(df):
 
 def analyze_timeframe(df, name):
     df["rsi"] = RSIIndicator(close=df["close"], window=14).rsi()
-
-    df["ema20"] = EMAIndicator(
-        close=df["close"],
-        window=20
-    ).ema_indicator()
-
-    df["ema50"] = EMAIndicator(
-        close=df["close"],
-        window=50
-    ).ema_indicator()
+    df["ema20"] = EMAIndicator(close=df["close"], window=20).ema_indicator()
+    df["ema50"] = EMAIndicator(close=df["close"], window=50).ema_indicator()
 
     macd = MACD(close=df["close"])
     df["macd"] = macd.macd()
@@ -155,16 +149,6 @@ def analyze_timeframe(df, name):
     volatility = latest["bb_high"] - latest["bb_low"]
 
     tf_score = trend_score + macd_score + candle_score + zone_score
-
-    print(f"\n===== {name} =====")
-    print(f"Prijs: ${price:.4f}")
-    print(f"RSI: {latest['rsi']:.2f}")
-    print(f"Trend: {trend}")
-    print(f"MACD: {macd_status}")
-    print(f"Candlestick: {candle}")
-    print(f"Zone status: {zone_status}")
-    print(f"Volume strength: {volume_strength:.2f}")
-    print(f"Timeframe score: {tf_score}")
 
     return {
         "price": price,
@@ -242,88 +226,121 @@ def fake_breakout_detector(r15, r1h, r4h, breakout):
 
     risk = min(100, fake_score * 10)
 
-    if risk >= 70:
-        warning = "Hoog fake breakout risico"
-    elif risk >= 40:
-        warning = "Gemiddeld fake breakout risico"
+    return risk, reasons
+
+
+def analyze_symbol(symbol):
+    print(f"\n==============================")
+    print(f"ANALYSE: {symbol}")
+    print(f"==============================")
+
+    df_15m = get_data(symbol, "15m")
+    df_1h = get_data(symbol, "1h")
+    df_4h = get_data(symbol, "4h")
+
+    r15 = analyze_timeframe(df_15m, "15 MIN")
+    r1h = analyze_timeframe(df_1h, "1 UUR")
+    r4h = analyze_timeframe(df_4h, "4 UUR")
+
+    total_score = r15["score"] + r1h["score"] + r4h["score"]
+
+    breakout_probability, rejection_probability = breakout_engine(
+        r15,
+        r1h,
+        r4h
+    )
+
+    fake_risk, fake_reasons = fake_breakout_detector(
+        r15,
+        r1h,
+        r4h,
+        breakout_probability
+    )
+
+    if fake_risk >= 70:
+        prediction = "Wachten - hoog fake breakout risico"
+    elif breakout_probability >= 70:
+        prediction = "Hoge breakout kans"
+    elif breakout_probability >= 55:
+        prediction = "Licht bullish"
+    elif rejection_probability >= 70:
+        prediction = "Hoge rejection kans"
     else:
-        warning = "Laag fake breakout risico"
+        prediction = "Neutraal"
 
-    return risk, warning, reasons
+    print(f"Prijs: {r1h['price']:.4f}")
+    print(f"Score: {total_score}")
+    print(f"Breakout probability: {breakout_probability}%")
+    print(f"Fake breakout risk: {fake_risk}%")
+    print(f"Voorspelling: {prediction}")
+
+    return {
+        "datetime": datetime.now(),
+        "symbol": symbol,
+        "prediction": prediction,
+        "score": total_score,
+        "breakout_probability": breakout_probability,
+        "rejection_probability": rejection_probability,
+        "fake_breakout_risk": fake_risk,
+        "price_15m": r15["price"],
+        "price_1h": r1h["price"],
+        "price_4h": r4h["price"],
+        "trend_15m": r15["trend"],
+        "trend_1h": r1h["trend"],
+        "trend_4h": r4h["trend"],
+        "rsi_15m": r15["rsi"],
+        "rsi_1h": r1h["rsi"],
+        "rsi_4h": r4h["rsi"],
+        "volume_strength_15m": r15["volume_strength"],
+        "volume_strength_1h": r1h["volume_strength"],
+        "volume_strength_4h": r4h["volume_strength"],
+        "chart_df": r1h["df"],
+        "zones": r1h["zones"]
+    }
 
 
-df_15m = get_data("15m")
-df_1h = get_data("1h")
-df_4h = get_data("4h")
+results = []
 
-r15 = analyze_timeframe(df_15m, "15 MIN")
-r1h = analyze_timeframe(df_1h, "1 UUR")
-r4h = analyze_timeframe(df_4h, "4 UUR")
+for symbol in SYMBOLS:
+    try:
+        result = analyze_symbol(symbol)
+        results.append(result)
+    except Exception as e:
+        print(f"Fout bij {symbol}: {e}")
 
-total_score = r15["score"] + r1h["score"] + r4h["score"]
 
-breakout_probability, rejection_probability = breakout_engine(
-    r15,
-    r1h,
-    r4h
-)
+if not results:
+    print("Geen resultaten.")
+    exit()
 
-fake_risk, fake_warning, fake_reasons = fake_breakout_detector(
-    r15,
-    r1h,
-    r4h,
-    breakout_probability
-)
 
-print("\n===== BREAKOUT ENGINE =====")
-print(f"Breakout probability: {breakout_probability}%")
-print(f"Rejection probability: {rejection_probability}%")
+log_rows = []
 
-print("\n===== FAKE BREAKOUT DETECTOR =====")
-print(f"Fake breakout risk: {fake_risk}%")
-print(f"Waarschuwing: {fake_warning}")
+for r in results:
+    log_rows.append({
+        "datetime": r["datetime"],
+        "symbol": r["symbol"],
+        "prediction": r["prediction"],
+        "score": r["score"],
+        "breakout_probability": r["breakout_probability"],
+        "rejection_probability": r["rejection_probability"],
+        "fake_breakout_risk": r["fake_breakout_risk"],
+        "price_15m": r["price_15m"],
+        "price_1h": r["price_1h"],
+        "price_4h": r["price_4h"],
+        "trend_15m": r["trend_15m"],
+        "trend_1h": r["trend_1h"],
+        "trend_4h": r["trend_4h"],
+        "rsi_15m": r["rsi_15m"],
+        "rsi_1h": r["rsi_1h"],
+        "rsi_4h": r["rsi_4h"],
+        "volume_strength_15m": r["volume_strength_15m"],
+        "volume_strength_1h": r["volume_strength_1h"],
+        "volume_strength_4h": r["volume_strength_4h"],
+    })
 
-for reason in fake_reasons:
-    print(f"- {reason}")
 
-print("\n===== TOTALE ANALYSE =====")
-print(f"Totale score: {total_score}")
-
-if fake_risk >= 70:
-    prediction = "Wachten - hoog fake breakout risico"
-elif breakout_probability >= 70:
-    prediction = "Hoge breakout kans"
-elif breakout_probability >= 55:
-    prediction = "Licht bullish"
-elif rejection_probability >= 70:
-    prediction = "Hoge rejection kans"
-else:
-    prediction = "Neutraal"
-
-print(f"Voorspelling: {prediction}")
-
-log_data = {
-    "datetime": [datetime.now()],
-    "prediction": [prediction],
-    "score": [total_score],
-    "breakout_probability": [breakout_probability],
-    "rejection_probability": [rejection_probability],
-    "fake_breakout_risk": [fake_risk],
-    "price_15m": [r15["price"]],
-    "price_1h": [r1h["price"]],
-    "price_4h": [r4h["price"]],
-    "trend_15m": [r15["trend"]],
-    "trend_1h": [r1h["trend"]],
-    "trend_4h": [r4h["trend"]],
-    "rsi_15m": [r15["rsi"]],
-    "rsi_1h": [r1h["rsi"]],
-    "rsi_4h": [r4h["rsi"]],
-    "volume_strength_15m": [r15["volume_strength"]],
-    "volume_strength_1h": [r1h["volume_strength"]],
-    "volume_strength_4h": [r4h["volume_strength"]],
-}
-
-log_df = pd.DataFrame(log_data)
+log_df = pd.DataFrame(log_rows)
 
 if os.path.exists(LOG_FILE):
     old = pd.read_csv(LOG_FILE)
@@ -342,14 +359,21 @@ if os.path.exists(LOG_FILE):
 else:
     log_df.to_csv(LOG_FILE, index=False)
 
-print("\nAnalyse opgeslagen.")
+print("\nAlle analyses opgeslagen.")
 
-df_chart = r1h["df"]
-zones = r1h["zones"]
+
+best = sorted(
+    results,
+    key=lambda x: (x["breakout_probability"], -x["fake_breakout_risk"], x["score"]),
+    reverse=True
+)[0]
+
+df_chart = best["chart_df"]
+zones = best["zones"]
 
 plt.figure(figsize=(14, 7))
 
-plt.plot(df_chart["time"], df_chart["close"], label="XRP prijs")
+plt.plot(df_chart["time"], df_chart["close"], label=f"{best['symbol']} prijs")
 plt.plot(df_chart["time"], df_chart["ema20"], label="EMA20")
 plt.plot(df_chart["time"], df_chart["ema50"], label="EMA50")
 
@@ -368,7 +392,7 @@ plt.axhspan(
 )
 
 plt.title(
-    f"XRP | Breakout: {breakout_probability}% | Fake risk: {fake_risk}% | {prediction}"
+    f"Beste setup: {best['symbol']} | Breakout: {best['breakout_probability']}% | Fake risk: {best['fake_breakout_risk']}% | {best['prediction']}"
 )
 
 plt.xlabel("Tijd")
@@ -379,4 +403,4 @@ plt.tight_layout()
 plt.savefig(CHART_FILE)
 plt.close()
 
-print("Grafiek opgeslagen.")
+print(f"Grafiek opgeslagen voor beste setup: {best['symbol']}")
