@@ -1,42 +1,79 @@
 import streamlit as st
 import pandas as pd
 import os
-from PIL import Image
 
-st.set_page_config(
-    page_title="XRP Dashboard",
-    layout="wide"
-)
+st.set_page_config(page_title="Crypto AI Scanner", layout="wide")
 
-st.title("🚀 XRP Dashboard")
+st.title("🚀 Crypto AI Scanner")
 
 log_file = "/data/xrp_prediction_log.csv"
 chart_file = "/data/xrp_chart.png"
 
-if os.path.exists(log_file):
-    df = pd.read_csv(log_file)
-
-    st.subheader("Laatste voorspellingen")
-    st.dataframe(df.tail(20), use_container_width=True)
-
-    laatste = df.iloc[-1]
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric("Breakout kans", f"{laatste['breakout_probability']}%")
-
-    with col2:
-        st.metric("Fake breakout risk", f"{laatste['fake_breakout_risk']}%")
-
-    with col3:
-        st.metric("Voorspelling", laatste['prediction'])
-
-else:
+if not os.path.exists(log_file):
     st.warning("Nog geen logbestand gevonden")
+    st.stop()
+
+df = pd.read_csv(log_file)
+
+latest_time = df["datetime"].max()
+latest = df[df["datetime"] == latest_time].copy()
+
+latest["rank_score"] = (
+    latest["breakout_probability"]
+    - latest["fake_breakout_risk"]
+    + latest["score"] * 5
+)
+
+latest = latest.sort_values("rank_score", ascending=False)
+
+st.subheader("🏆 Beste setups")
+
+top = latest.head(3)
+
+cols = st.columns(3)
+
+medals = ["🥇", "🥈", "🥉"]
+
+for i, (_, row) in enumerate(top.iterrows()):
+    with cols[i]:
+        st.metric(
+            f"{medals[i]} {row['symbol']}",
+            row["prediction"],
+            f"Score {row['rank_score']}"
+        )
+        st.write(f"Breakout: **{row['breakout_probability']}%**")
+        st.write(f"Fake risk: **{row['fake_breakout_risk']}%**")
+        st.write(f"Trend 1h: **{row['trend_1h']}**")
+        st.write(f"RSI 1h: **{round(row['rsi_1h'], 2)}**")
+
+st.subheader("📊 Laatste scan")
+
+st.dataframe(
+    latest[
+        [
+            "symbol",
+            "prediction",
+            "rank_score",
+            "breakout_probability",
+            "fake_breakout_risk",
+            "score",
+            "price_1h",
+            "trend_15m",
+            "trend_1h",
+            "trend_4h",
+            "rsi_15m",
+            "rsi_1h",
+            "rsi_4h",
+            "volume_strength_15m",
+            "volume_strength_1h",
+            "volume_strength_4h",
+        ]
+    ],
+    use_container_width=True
+)
 
 if os.path.exists(chart_file):
-    st.subheader("Laatste grafiek")
+    st.subheader("📈 Beste setup grafiek")
     st.image(chart_file, use_container_width=True)
 
 st.caption("Auto refresh elke 60 seconden")
