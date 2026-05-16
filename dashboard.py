@@ -30,6 +30,18 @@ latest["rank_score"] = (
 
 latest = latest.sort_values("rank_score", ascending=False)
 
+st.subheader("🌍 Market Intelligence")
+
+market_cols = st.columns(3)
+
+fg_value = latest["fear_greed_value"].dropna().iloc[-1] if "fear_greed_value" in latest.columns and latest["fear_greed_value"].notna().any() else "-"
+fg_label = latest["fear_greed_label"].dropna().iloc[-1] if "fear_greed_label" in latest.columns and latest["fear_greed_label"].notna().any() else "-"
+market_mode = latest["market_mode"].dropna().iloc[-1] if "market_mode" in latest.columns and latest["market_mode"].notna().any() else "-"
+
+market_cols[0].metric("Fear & Greed", f"{fg_value}")
+market_cols[1].metric("Sentiment", f"{fg_label}")
+market_cols[2].metric("Market mode", f"{market_mode}")
+
 opportunities = latest[
     (latest["breakout_probability"] >= 55)
     & (latest["fake_breakout_risk"] <= 50)
@@ -101,6 +113,9 @@ columns = [
     "volume_strength_15m",
     "volume_strength_1h",
     "volume_strength_4h",
+    "fear_greed_value",
+    "fear_greed_label",
+    "market_mode",
 ]
 
 available_columns = [col for col in columns if col in latest.columns]
