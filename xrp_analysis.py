@@ -9,6 +9,7 @@ import os
 
 SYMBOL = "XRPUSDT"
 LOG_FILE = "xrp_prediction_log.csv"
+CHART_FILE = "xrp_chart.png"
 
 
 def get_data(interval):
@@ -20,7 +21,7 @@ def get_data(interval):
         "limit": 150
     }
 
-    response = requests.get(url, params=params)
+    response = requests.get(url, params=params, timeout=15)
     data = response.json()
 
     df = pd.DataFrame(data, columns=[
@@ -44,7 +45,6 @@ def detect_zones(df):
 
     support = recent["low"].min()
     resistance = recent["high"].max()
-
     zone_size = recent["close"].mean() * 0.003
 
     return {
@@ -108,38 +108,23 @@ def analyze_timeframe(df, name):
     ).ema_indicator()
 
     macd = MACD(close=df["close"])
-
     df["macd"] = macd.macd()
     df["macd_signal"] = macd.macd_signal()
 
-    bb = BollingerBands(
-        close=df["close"],
-        window=20
-    )
-
+    bb = BollingerBands(close=df["close"], window=20)
     df["bb_high"] = bb.bollinger_hband()
     df["bb_low"] = bb.bollinger_lband()
 
     latest = df.iloc[-1]
-
     price = latest["close"]
-
     zones = detect_zones(df)
 
-    if (
-        price > latest["ema20"]
-        and latest["ema20"] > latest["ema50"]
-    ):
+    if price > latest["ema20"] and latest["ema20"] > latest["ema50"]:
         trend = "Bullish"
         trend_score = 1
-
-    elif (
-        price < latest["ema20"]
-        and latest["ema20"] < latest["ema50"]
-    ):
+    elif price < latest["ema20"] and latest["ema20"] < latest["ema50"]:
         trend = "Bearish"
         trend_score = -1
-
     else:
         trend = "Neutraal"
         trend_score = 0
@@ -147,7 +132,6 @@ def analyze_timeframe(df, name):
     if latest["macd"] > latest["macd_signal"]:
         macd_status = "Bullish"
         macd_score = 1
-
     else:
         macd_status = "Bearish"
         macd_score = -1
@@ -157,38 +141,20 @@ def analyze_timeframe(df, name):
     zone_status = "Geen belangrijke zone"
     zone_score = 0
 
-    if (
-        zones["support_low"]
-        <= price
-        <= zones["support_high"]
-    ):
+    if zones["support_low"] <= price <= zones["support_high"]:
         zone_status = "Prijs zit in support zone"
         zone_score = 1
 
-    if (
-        zones["resistance_low"]
-        <= price
-        <= zones["resistance_high"]
-    ):
+    if zones["resistance_low"] <= price <= zones["resistance_high"]:
         zone_status = "Prijs zit in resistance zone"
         zone_score = -1
 
-    volume_strength = (
-        latest["volume"]
-        / df["volume"].tail(20).mean()
-    )
+    avg_volume = df["volume"].tail(20).mean()
+    volume_strength = latest["volume"] / avg_volume if avg_volume > 0 else 0
 
-    volatility = (
-        latest["bb_high"]
-        - latest["bb_low"]
-    )
+    volatility = latest["bb_high"] - latest["bb_low"]
 
-    tf_score = (
-        trend_score
-        + macd_score
-        + candle_score
-        + zone_score
-    )
+    tf_score = trend_score + macd_score + candle_score + zone_score
 
     print(f"\n===== {name} =====")
     print(f"Prijs: ${price:.4f}")
@@ -219,7 +185,6 @@ def breakout_engine(r15, r1h, r4h):
     score = 0
 
     for r in [r15, r1h, r4h]:
-
         if r["trend"] == "Bullish":
             score += 1
 
@@ -242,7 +207,6 @@ def breakout_engine(r15, r1h, r4h):
         score += 1
 
     breakout = min(100, score * 10)
-
     rejection = 100 - breakout
 
     return breakout, rejection
@@ -254,15 +218,11 @@ def fake_breakout_detector(r15, r1h, r4h, breakout):
 
     if "resistance" in r15["zone_status"]:
         fake_score += 2
-        reasons.append(
-            "15m prijs zit in resistance zone"
-        )
+        reasons.append("15m prijs zit in resistance zone")
 
     if "resistance" in r1h["zone_status"]:
         fake_score += 2
-        reasons.append(
-            "1h prijs zit in resistance zone"
-        )
+        reasons.append("1h prijs zit in resistance zone")
 
     if r15["volume_strength"] < 0.8:
         fake_score += 2
@@ -274,24 +234,18 @@ def fake_breakout_detector(r15, r1h, r4h, breakout):
 
     if r4h["trend"] != "Bullish":
         fake_score += 1
-        reasons.append(
-            "4h trend is niet bullish"
-        )
+        reasons.append("4h trend is niet bullish")
 
     if breakout < 50:
         fake_score += 2
-        reasons.append(
-            "Breakout probability is laag"
-        )
+        reasons.append("Breakout probability is laag")
 
     risk = min(100, fake_score * 10)
 
     if risk >= 70:
         warning = "Hoog fake breakout risico"
-
     elif risk >= 40:
         warning = "Gemiddeld fake breakout risico"
-
     else:
         warning = "Laag fake breakout risico"
 
@@ -306,11 +260,7 @@ r15 = analyze_timeframe(df_15m, "15 MIN")
 r1h = analyze_timeframe(df_1h, "1 UUR")
 r4h = analyze_timeframe(df_4h, "4 UUR")
 
-total_score = (
-    r15["score"]
-    + r1h["score"]
-    + r4h["score"]
-)
+total_score = r15["score"] + r1h["score"] + r4h["score"]
 
 breakout_probability, rejection_probability = breakout_engine(
     r15,
@@ -326,40 +276,27 @@ fake_risk, fake_warning, fake_reasons = fake_breakout_detector(
 )
 
 print("\n===== BREAKOUT ENGINE =====")
-
-print(
-    f"Breakout probability: {breakout_probability}%"
-)
-
-print(
-    f"Rejection probability: {rejection_probability}%"
-)
+print(f"Breakout probability: {breakout_probability}%")
+print(f"Rejection probability: {rejection_probability}%")
 
 print("\n===== FAKE BREAKOUT DETECTOR =====")
-
 print(f"Fake breakout risk: {fake_risk}%")
-
 print(f"Waarschuwing: {fake_warning}")
 
 for reason in fake_reasons:
     print(f"- {reason}")
 
 print("\n===== TOTALE ANALYSE =====")
-
 print(f"Totale score: {total_score}")
 
 if fake_risk >= 70:
     prediction = "Wachten - hoog fake breakout risico"
-
 elif breakout_probability >= 70:
     prediction = "Hoge breakout kans"
-
 elif breakout_probability >= 55:
     prediction = "Licht bullish"
-
 elif rejection_probability >= 70:
     prediction = "Hoge rejection kans"
-
 else:
     prediction = "Neutraal"
 
@@ -374,13 +311,21 @@ log_data = {
     "fake_breakout_risk": [fake_risk],
     "price_15m": [r15["price"]],
     "price_1h": [r1h["price"]],
-    "price_4h": [r4h["price"]]
+    "price_4h": [r4h["price"]],
+    "trend_15m": [r15["trend"]],
+    "trend_1h": [r1h["trend"]],
+    "trend_4h": [r4h["trend"]],
+    "rsi_15m": [r15["rsi"]],
+    "rsi_1h": [r1h["rsi"]],
+    "rsi_4h": [r4h["rsi"]],
+    "volume_strength_15m": [r15["volume_strength"]],
+    "volume_strength_1h": [r1h["volume_strength"]],
+    "volume_strength_4h": [r4h["volume_strength"]],
 }
 
 log_df = pd.DataFrame(log_data)
 
 if os.path.exists(LOG_FILE):
-
     old = pd.read_csv(LOG_FILE)
 
     for col in log_df.columns:
@@ -392,48 +337,21 @@ if os.path.exists(LOG_FILE):
             log_df[col] = None
 
     log_df = log_df[old.columns]
-
-    final_log = pd.concat(
-        [old, log_df],
-        ignore_index=True
-    )
-
-    final_log.to_csv(
-        LOG_FILE,
-        index=False
-    )
-
+    final_log = pd.concat([old, log_df], ignore_index=True)
+    final_log.to_csv(LOG_FILE, index=False)
 else:
-    log_df.to_csv(
-        LOG_FILE,
-        index=False
-    )
+    log_df.to_csv(LOG_FILE, index=False)
 
 print("\nAnalyse opgeslagen.")
 
 df_chart = r1h["df"]
-
 zones = r1h["zones"]
 
 plt.figure(figsize=(14, 7))
 
-plt.plot(
-    df_chart["time"],
-    df_chart["close"],
-    label="XRP prijs"
-)
-
-plt.plot(
-    df_chart["time"],
-    df_chart["ema20"],
-    label="EMA20"
-)
-
-plt.plot(
-    df_chart["time"],
-    df_chart["ema50"],
-    label="EMA50"
-)
+plt.plot(df_chart["time"], df_chart["close"], label="XRP prijs")
+plt.plot(df_chart["time"], df_chart["ema20"], label="EMA20")
+plt.plot(df_chart["time"], df_chart["ema50"], label="EMA50")
 
 plt.axhspan(
     zones["support_low"],
@@ -454,17 +372,11 @@ plt.title(
 )
 
 plt.xlabel("Tijd")
-
 plt.ylabel("Prijs")
-
 plt.legend()
-
 plt.xticks(rotation=45)
-
 plt.tight_layout()
-
-plt.savefig("xrp_chart.png")
-
+plt.savefig(CHART_FILE)
 plt.close()
 
 print("Grafiek opgeslagen.")
