@@ -59,7 +59,7 @@ available_columns = [
     col for col in columns if col in latest.columns
 ]
 
-st.subheader("🌍 Market Intelligence")
+st.subheader("🌍 Markt Intelligentie")
 
 market_cols = st.columns(3)
 
@@ -84,9 +84,34 @@ market_mode = (
     else "-"
 )
 
-market_cols[0].metric("Fear & Greed", f"{fg_value}")
-market_cols[1].metric("Sentiment", f"{fg_label}")
-market_cols[2].metric("Market mode", f"{market_mode}")
+translated_label = {
+    "Extreme Fear": "Extreme Angst",
+    "Fear": "Angst",
+    "Neutral": "Neutraal",
+    "Greed": "Hebzucht",
+    "Extreme Greed": "Extreme Hebzucht"
+}
+
+fg_label_nl = translated_label.get(fg_label, fg_label)
+market_mode_nl = translated_label.get(
+    market_mode,
+    market_mode
+)
+
+market_cols[0].metric(
+    "Fear & Greed Index",
+    f"{fg_value}"
+)
+
+market_cols[1].metric(
+    "Markt Sentiment",
+    f"{fg_label_nl}"
+)
+
+market_cols[2].metric(
+    "Marktmodus",
+    f"{market_mode_nl}"
+)
 
 opportunities = latest[
     (latest["breakout_probability"] >= 55)
@@ -144,6 +169,7 @@ medals = ["🥇", "🥈", "🥉"]
 
 for i, (_, row) in enumerate(top.iterrows()):
     with cols[i]:
+
         st.metric(
             f"{medals[i]} {row['symbol']}",
             row["prediction"],
@@ -174,8 +200,13 @@ st.dataframe(
 )
 
 if os.path.exists(chart_file):
+
     st.subheader("📈 Beste setup grafiek")
-    st.image(chart_file, use_container_width=True)
+
+    st.image(
+        chart_file,
+        use_container_width=True
+    )
 
 st.caption("Auto refresh elke 60 seconden")
 
