@@ -20,6 +20,46 @@ SYMBOLS = [
 
 LOG_FILE = "xrp_prediction_log.csv"
 CHART_FILE = "xrp_chart.png"
+ALERT_FILE = "last_alert.txt"
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+
+def send_telegram_alert(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram niet ingesteld.")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+
+    try:
+        requests.post(url, data=payload, timeout=10)
+        print("Telegram alert verzonden.")
+    except Exception as e:
+        print(f"Telegram fout: {e}")
+
+
+def should_send_alert(symbol, prediction, breakout, fake_risk):
+    alert_key = f"{symbol}|{prediction}|{breakout}|{fake_risk}"
+
+    if os.path.exists(ALERT_FILE):
+        with open(ALERT_FILE, "r") as f:
+            last_alert = f.read().strip()
+
+        if last_alert == alert_key:
+            return False
+
+    with open(ALERT_FILE, "w") as f:
+        f.write(alert_key)
+
+    return True
 
 
 def get_fear_and_greed():
@@ -109,10 +149,18 @@ def detect_candle(df):
     if upper_wick > body * 2 and lower_wick < body:
         return "Shooting Star", -1
 
-    if prev["close"] < prev["open"] and last["close"] > last["open"] and last["close"] > prev["open"]:
+    if (
+        prev["close"] < prev["open"]
+        and last["close"] > last["open"]
+        and last["close"] > prev["open"]
+    ):
         return "Bullish Engulfing", 2
 
-    if prev["close"] > prev["open"] and last["close"] < last["open"] and last["close"] < prev["open"]:
+    if (
+        prev["close"] > prev["open"]
+        and last["close"] < last["open"]
+        and last["close"] < prev["open"]
+    ):
         return "Bearish Engulfing", -2
 
     return "Geen duidelijk patroon", 0
@@ -454,3 +502,37 @@ plt.savefig(CHART_FILE)
 plt.close()
 
 print(f"Grafiek opgeslagen voor beste setup: {best['symbol']}")
+
+
+best_symbol = best["symbol"]
+best_prediction = best["prediction"]
+best_breakout = best["breakout_probability"]
+best_fake_risk = best["fake_breakout_risk"]
+best_score = best["score"]
+best_price = best["price_1h"]
+
+if best_breakout >= 55 or best_fake_risk <= 50:
+    if should_send_alert(
+        best_symbol,
+        best_prediction,
+        best_breakout,
+        best_fake_risk
+    ):
+        message = f"""
+🚀 <b>Crypto AI Scanner Alert</b>
+
+<b>Coin:</b> {best_symbol}
+<b>Voorspelling:</b> {best_prediction}
+
+<b>Breakout kans:</b> {best_breakout}%
+<b>Fake breakout risk:</b> {best_fake_risk}%
+<b>Score:</b> {best_score}
+<b>Prijs:</b> {best_price}
+
+<b>Market mode:</b> {best["market_mode"]}
+<b>Fear & Greed:</b> {best["fear_greed_value"]} ({best["fear_greed_label"]})
+"""
+
+        send_telegram_alert(message)
+else:
+    print("Geen Telegram alert nodig.")
