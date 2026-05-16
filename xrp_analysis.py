@@ -22,6 +22,29 @@ LOG_FILE = "xrp_prediction_log.csv"
 CHART_FILE = "xrp_chart.png"
 
 
+def get_fear_and_greed():
+    try:
+        url = "https://api.alternative.me/fng/"
+        data = requests.get(url, timeout=10).json()
+        value = int(data["data"][0]["value"])
+        label = data["data"][0]["value_classification"]
+        return value, label
+    except Exception:
+        return 50, "Neutral"
+
+
+def get_market_mode(fear_greed_value):
+    if fear_greed_value <= 25:
+        return "Extreme Fear"
+    if fear_greed_value <= 45:
+        return "Fear"
+    if fear_greed_value <= 55:
+        return "Neutral"
+    if fear_greed_value <= 75:
+        return "Greed"
+    return "Extreme Greed"
+
+
 def get_data(symbol, interval):
     url = "https://api.binance.com/api/v3/klines"
 
@@ -52,7 +75,6 @@ def get_data(symbol, interval):
 
 def detect_zones(df):
     recent = df.tail(80)
-
     support = recent["low"].min()
     resistance = recent["high"].max()
     zone_size = recent["close"].mean() * 0.003
@@ -96,7 +118,7 @@ def detect_candle(df):
     return "Geen duidelijk patroon", 0
 
 
-def analyze_timeframe(df, name):
+def analyze_timeframe(df):
     df["rsi"] = RSIIndicator(close=df["close"], window=14).rsi()
     df["ema20"] = EMAIndicator(close=df["close"], window=20).ema_indicator()
     df["ema50"] = EMAIndicator(close=df["close"], window=50).ema_indicator()
@@ -123,12 +145,8 @@ def analyze_timeframe(df, name):
         trend = "Neutraal"
         trend_score = 0
 
-    if latest["macd"] > latest["macd_signal"]:
-        macd_status = "Bullish"
-        macd_score = 1
-    else:
-        macd_status = "Bearish"
-        macd_score = -1
+    macd_status = "Bullish" if latest["macd"] > latest["macd_signal"] else "Bearish"
+    macd_score = 1 if macd_status == "Bullish" else -1
 
     candle, candle_score = detect_candle(df)
 
@@ -146,8 +164,6 @@ def analyze_timeframe(df, name):
     avg_volume = df["volume"].tail(20).mean()
     volume_strength = latest["volume"] / avg_volume if avg_volume > 0 else 0
 
-    volatility = latest["bb_high"] - latest["bb_low"]
-
     tf_score = trend_score + macd_score + candle_score + zone_score
 
     return {
@@ -158,14 +174,13 @@ def analyze_timeframe(df, name):
         "candle": candle,
         "zone_status": zone_status,
         "volume_strength": volume_strength,
-        "volatility": volatility,
         "score": tf_score,
         "zones": zones,
         "df": df
     }
 
 
-def breakout_engine(r15, r1h, r4h):
+def breakout_engine(r15, r1h, r4h, fear_greed_value):
     score = 0
 
     for r in [r15, r1h, r4h]:
@@ -190,13 +205,19 @@ def breakout_engine(r15, r1h, r4h):
     if r1h["rsi"] > 55:
         score += 1
 
-    breakout = min(100, score * 10)
+    if fear_greed_value >= 60:
+        score += 1
+
+    if fear_greed_value <= 30:
+        score -= 1
+
+    breakout = max(0, min(100, score * 10))
     rejection = 100 - breakout
 
     return breakout, rejection
 
 
-def fake_breakout_detector(r15, r1h, r4h, breakout):
+def fake_breakout_detector(r15, r1h, r4h, breakout, fear_greed_value):
     fake_score = 0
     reasons = []
 
@@ -224,37 +245,41 @@ def fake_breakout_detector(r15, r1h, r4h, breakout):
         fake_score += 2
         reasons.append("Breakout probability is laag")
 
+    if fear_greed_value <= 30:
+        fake_score += 1
+        reasons.append("Fear & Greed staat laag")
+
     risk = min(100, fake_score * 10)
 
     return risk, reasons
 
 
-def analyze_symbol(symbol):
-    print(f"\n==============================")
-    print(f"ANALYSE: {symbol}")
-    print(f"==============================")
+def analyze_symbol(symbol, fear_greed_value, fear_greed_label, market_mode):
+    print(f"\n===== ANALYSE: {symbol} =====")
 
     df_15m = get_data(symbol, "15m")
     df_1h = get_data(symbol, "1h")
     df_4h = get_data(symbol, "4h")
 
-    r15 = analyze_timeframe(df_15m, "15 MIN")
-    r1h = analyze_timeframe(df_1h, "1 UUR")
-    r4h = analyze_timeframe(df_4h, "4 UUR")
+    r15 = analyze_timeframe(df_15m)
+    r1h = analyze_timeframe(df_1h)
+    r4h = analyze_timeframe(df_4h)
 
     total_score = r15["score"] + r1h["score"] + r4h["score"]
 
     breakout_probability, rejection_probability = breakout_engine(
         r15,
         r1h,
-        r4h
+        r4h,
+        fear_greed_value
     )
 
     fake_risk, fake_reasons = fake_breakout_detector(
         r15,
         r1h,
         r4h,
-        breakout_probability
+        breakout_probability,
+        fear_greed_value
     )
 
     if fake_risk >= 70:
@@ -270,8 +295,10 @@ def analyze_symbol(symbol):
 
     print(f"Prijs: {r1h['price']:.4f}")
     print(f"Score: {total_score}")
-    print(f"Breakout probability: {breakout_probability}%")
-    print(f"Fake breakout risk: {fake_risk}%")
+    print(f"Breakout: {breakout_probability}%")
+    print(f"Fake risk: {fake_risk}%")
+    print(f"Fear & Greed: {fear_greed_value} ({fear_greed_label})")
+    print(f"Market mode: {market_mode}")
     print(f"Voorspelling: {prediction}")
 
     return {
@@ -294,17 +321,33 @@ def analyze_symbol(symbol):
         "volume_strength_15m": r15["volume_strength"],
         "volume_strength_1h": r1h["volume_strength"],
         "volume_strength_4h": r4h["volume_strength"],
+        "fear_greed_value": fear_greed_value,
+        "fear_greed_label": fear_greed_label,
+        "market_mode": market_mode,
         "chart_df": r1h["df"],
         "zones": r1h["zones"]
     }
 
 
+fear_greed_value, fear_greed_label = get_fear_and_greed()
+market_mode = get_market_mode(fear_greed_value)
+
+print("\n===== MARKET INTELLIGENCE =====")
+print(f"Fear & Greed: {fear_greed_value} ({fear_greed_label})")
+print(f"Market mode: {market_mode}")
+
 results = []
 
 for symbol in SYMBOLS:
     try:
-        result = analyze_symbol(symbol)
-        results.append(result)
+        results.append(
+            analyze_symbol(
+                symbol,
+                fear_greed_value,
+                fear_greed_label,
+                market_mode
+            )
+        )
     except Exception as e:
         print(f"Fout bij {symbol}: {e}")
 
@@ -337,6 +380,9 @@ for r in results:
         "volume_strength_15m": r["volume_strength_15m"],
         "volume_strength_1h": r["volume_strength_1h"],
         "volume_strength_4h": r["volume_strength_4h"],
+        "fear_greed_value": r["fear_greed_value"],
+        "fear_greed_label": r["fear_greed_label"],
+        "market_mode": r["market_mode"],
     })
 
 
@@ -364,7 +410,11 @@ print("\nAlle analyses opgeslagen.")
 
 best = sorted(
     results,
-    key=lambda x: (x["breakout_probability"], -x["fake_breakout_risk"], x["score"]),
+    key=lambda x: (
+        x["breakout_probability"],
+        -x["fake_breakout_risk"],
+        x["score"]
+    ),
     reverse=True
 )[0]
 
