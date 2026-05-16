@@ -30,6 +30,40 @@ latest["rank_score"] = (
 
 latest = latest.sort_values("rank_score", ascending=False)
 
+opportunities = latest[
+    (latest["breakout_probability"] >= 55)
+    & (latest["fake_breakout_risk"] <= 50)
+]
+
+watchlist = latest[
+    (latest["breakout_probability"] >= 30)
+    & (latest["fake_breakout_risk"] <= 70)
+    & ~latest.index.isin(opportunities.index)
+]
+
+avoid = latest[
+    ~latest.index.isin(opportunities.index)
+    & ~latest.index.isin(watchlist.index)
+]
+
+st.subheader("🟢 Kansen")
+if len(opportunities) > 0:
+    st.dataframe(opportunities, use_container_width=True)
+else:
+    st.info("Geen sterke bullish kansen gevonden.")
+
+st.subheader("🟠 Watchlist")
+if len(watchlist) > 0:
+    st.dataframe(watchlist, use_container_width=True)
+else:
+    st.info("Geen watchlist setups.")
+
+st.subheader("🔴 Vermijden")
+if len(avoid) > 0:
+    st.dataframe(avoid, use_container_width=True)
+else:
+    st.success("Geen duidelijke avoid setups.")
+
 st.subheader("🏆 Beste setups")
 
 top = latest.head(3)
