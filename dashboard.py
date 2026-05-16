@@ -15,8 +15,12 @@ if not os.path.exists(log_file):
 
 df = pd.read_csv(log_file)
 
-latest_time = df["datetime"].max()
-latest = df[df["datetime"] == latest_time].copy()
+latest = (
+    df.sort_values("datetime")
+    .groupby("symbol")
+    .tail(1)
+    .copy()
+)
 
 latest["rank_score"] = (
     latest["breakout_probability"]
@@ -29,9 +33,7 @@ latest = latest.sort_values("rank_score", ascending=False)
 st.subheader("🏆 Beste setups")
 
 top = latest.head(3)
-
 cols = st.columns(3)
-
 medals = ["🥇", "🥈", "🥉"]
 
 for i, (_, row) in enumerate(top.iterrows()):
@@ -48,27 +50,29 @@ for i, (_, row) in enumerate(top.iterrows()):
 
 st.subheader("📊 Laatste scan")
 
+columns = [
+    "symbol",
+    "prediction",
+    "rank_score",
+    "breakout_probability",
+    "fake_breakout_risk",
+    "score",
+    "price_1h",
+    "trend_15m",
+    "trend_1h",
+    "trend_4h",
+    "rsi_15m",
+    "rsi_1h",
+    "rsi_4h",
+    "volume_strength_15m",
+    "volume_strength_1h",
+    "volume_strength_4h",
+]
+
+available_columns = [col for col in columns if col in latest.columns]
+
 st.dataframe(
-    latest[
-        [
-            "symbol",
-            "prediction",
-            "rank_score",
-            "breakout_probability",
-            "fake_breakout_risk",
-            "score",
-            "price_1h",
-            "trend_15m",
-            "trend_1h",
-            "trend_4h",
-            "rsi_15m",
-            "rsi_1h",
-            "rsi_4h",
-            "volume_strength_15m",
-            "volume_strength_1h",
-            "volume_strength_4h",
-        ]
-    ],
+    latest[available_columns],
     use_container_width=True
 )
 
