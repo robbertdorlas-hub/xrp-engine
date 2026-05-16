@@ -97,13 +97,16 @@ for i, (_, row) in enumerate(top.iterrows()):
 st.subheader("📊 Laatste scan")
 
 columns = [
+    "datetime",
     "symbol",
     "prediction",
     "rank_score",
     "breakout_probability",
     "fake_breakout_risk",
     "score",
+    "price_15m",
     "price_1h",
+    "price_4h",
     "trend_15m",
     "trend_1h",
     "trend_4h",
